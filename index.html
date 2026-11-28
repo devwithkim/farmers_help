@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Farmers Help</title>
+<style>
+:root{--bg:#f9ebe6;--card:#fff7f4;--ink:#202808;--mute:#6a5a48;--line:#efd0c4;--green:#B06A55;--green2:#f7d9d0;--btn:#fff;--accent:#C4866D;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#202808;--card:#33432B;--ink:#fbeee8;--mute:#E8C3B4;--line:#566349;--green:#EBA793;--green2:#6a403a;--btn:#202808;--accent:#EBA793;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#202808;--card:#33432B;--ink:#fbeee8;--mute:#E8C3B4;--line:#566349;--green:#EBA793;--green2:#6a403a;--btn:#202808;--accent:#EBA793;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{padding:20px 16px 8px;max-width:760px;margin:auto}
+h1{margin:0;font:700 26px Georgia,serif;color:var(--green)}
+header p{margin:4px 0 0;color:var(--mute);font-size:14px}
+nav{display:flex;gap:6px;overflow-x:auto;padding:10px 16px;max-width:760px;margin:auto}
+nav button{flex:none;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 14px;border-radius:20px;font:inherit;font-size:14px;cursor:pointer}
+nav button.on{background:var(--green);color:var(--btn);border-color:var(--green)}
+main{max-width:760px;margin:auto;padding:0 16px 40px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin:10px 0}
+.card h3{margin:0 0 4px;font-size:17px}
+.meta{font-size:12px;color:var(--mute);margin-bottom:6px}
+.body{white-space:pre-wrap;word-wrap:break-word}
+.tag{display:inline-block;background:var(--green2);color:var(--green);border-radius:10px;padding:1px 9px;font-size:12px;margin:6px 4px 0 0}
+form{display:grid;gap:8px}
+input,textarea,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+textarea{min-height:90px;resize:vertical}
+.go{background:var(--green);color:var(--btn);border:0;padding:10px 16px;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}
+.del{background:none;border:0;color:var(--mute);font-size:12px;cursor:pointer;padding:0;margin-left:8px}
+.note{color:var(--mute);font-size:14px;text-align:center;padding:20px}
+.hint{font-size:13px;color:var(--mute)}
+details.card summary{cursor:pointer;list-style:none}
+details.card summary::-webkit-details-marker{display:none}
+details.card summary h3{display:inline}
+.row{margin:10px 0 0}.row b{display:block;color:var(--green);font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+</style>
+</head>
+<body>
+<header>
+<h1>🌾 Farmers Help</h1>
+<p>Talk with other farmers and share notes on plants, soil and livestock.</p>
+</header>
+<nav id="tabs"></nav>
+<main>
+<div class="card" id="fc">
+<form id="f">
+<input id="t" placeholder="Title (for notes) or topic" maxlength="120">
+<textarea id="b" placeholder="Write your message or detailed note…" required maxlength="4000"></textarea>
+<input id="g" placeholder="Tags, separated by commas (e.g. tomato, blight, clay)" maxlength="100">
+<button class="go" id="send" type="submit">Post</button>
+<div class="hint" id="st"></div>
+</form>
+</div>
+<input id="q" placeholder="Search this section…" style="margin:6px 0">
+<div id="list"><div class="note">Loading…</div></div>
+</main>
+<script>
+const TABS=[["guides","📖 Guides"],["chat","💬 Community"],["plants","🌱 Plants"],["soil","🪨 Soil"],["livestock","🐄 Livestock"]];
+const HINT={guides:"General planting guidance. Timing and varieties vary, so check with your local extension officer.",chat:"Ask a question or share news.",plants:"Add a plant note: variety, planting dates, pests, yields.",soil:"Add a soil note: type, pH, amendments, drainage.",livestock:"Add a livestock note: breed, feed, health, housing."};
+let tab="guides",rows=[],db=null,me=null,userCap=null,names={},unsub=null;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function tabs(){
+  $("tabs").innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?"on":""}" data-k="${k}">${l}</button>`).join("");
+  $("tabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{tab=b.dataset.k;tabs();hintUp();listen();});
+}
+function hintUp(){
+  $("st").textContent=HINT[tab];
+  $("fc").style.display=tab==="guides"?"none":"";
+  if(tab==="guides")$("list").insertAdjacentHTML("beforebegin","");
+  $("t").placeholder=tab==="chat"?"Topic (optional)":"Title";
+}
+function ago(ms){
+  const m=Math.round((Date.now()-ms)/60000);
+  if(m<1)return"just now";if(m<60)return m+" min ago";
+  const h=Math.round(m/60);if(h<24)return h+" h ago";
+  return new Date(ms).toLocaleDateString();
+}
+async function resolveNames(){
+  if(!userCap)return;
+  const ids=[...new Set(rows.map(r=>r.by).filter(Boolean))];
+  try{const p=await userCap.profiles(ids);ids.forEach(i=>names[i]=(p[i]&&p[i].name)||"");}catch(e){}
+}
+async function render(){
+  await resolveNames();
+  const q=$("q").value.toLowerCase();
+  const sh=rows.filter(r=>!q||(r.title+" "+r.body+" "+(r.tags||[]).join(" ")).toLowerCase().includes(q));
+  if(!sh.length){$("list").innerHTML='<div class="note">Nothing here yet. Be the first to post.</div>';return;}
+  $("list").innerHTML=sh.map(r=>`<div class="card">
+    ${r.title?`<h3>${esc(r.title)}</h3>`:""}
+    <div class="meta">${esc(names[r.by]||"A farmer")} · ${ago(r.at)}${r.by===me?`<button class="del" data-id="${esc(r.id)}">Delete</button>`:""}</div>
+    <div class="body">${esc(r.body)}</div>
+    ${(r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</div>`).join("");
+  $("list").querySelectorAll(".del").forEach(b=>b.onclick=async()=>{
+    if(confirm("Delete this post?")){try{await db.collection("entries").doc(b.dataset.id).delete();}catch(e){alert("Could not delete.");}}
+  });
+}
+function listen(){
+  if(unsub){unsub();unsub=null;}
+  if(tab==="guides"){renderGuides();return;}
+  if(!db){$("list").innerHTML='<div class="note">Open this page in claude.ai while signed in to read and post.</div>';return;}
+  $("list").innerHTML='<div class="note">Loading…</div>';
+  const timer=setTimeout(()=>{$("list").innerHTML='<div class="note">Could not load posts. Please try again later.</div>';},10000);
+  unsub=db.collection("entries").where("type","==",tab).onSnapshot(s=>{
+    clearTimeout(timer);
+    rows=s.docs.map(d=>Object.assign({id:d.id},d.data())).sort((a,b)=>b.at-a.at);
+    render();
+  },e=>{clearTimeout(timer);$("list").innerHTML='<div class="note">Could not load posts.</div>';});
+}
+const G=[
+["Crop","Maize","A staple that rewards good soil preparation and early weeding.",[["When","Plant at the start of the rains, once the soil is moist."],["Soil","Well-drained loam, pH 5.5 to 7. Plough or dig deep and mix in manure or compost."],["Planting","Sow 1 or 2 seeds per hole, 5 cm deep. Spacing about 75 cm between rows and 25 to 30 cm between plants; thin to one plant."],["Feeding","Phosphorus fertilizer at planting, then a nitrogen top-dressing at 4 to 6 weeks."],["Care","Weed at 2 to 3 weeks and again at 5 to 6 weeks. Scout for fall armyworm and stalk borer, especially in young plants."],["Harvest","4 to 6 months depending on variety, when husks are dry and kernels hard."]]],
+["Crop","Beans","A fast legume that fixes its own nitrogen and improves soil after maize.",[["When","Plant at the onset of rains."],["Soil","Loam, pH 6 to 7, well drained. Avoid waterlogging."],["Planting","Bush beans: 2 seeds per hole, 3 to 5 cm deep, 50 cm between rows and 10 cm between holes."],["Care","Weed early and gently. Do not work among wet plants, which spreads disease. Rotate with cereals each season."],["Harvest","About 2.5 to 3.5 months. Pick when pods are dry and rattling for dry beans."]]],
+["Crop","Potatoes","Best in cool, well-drained highland soils with certified seed.",[["Seed","Use certified seed tubers. Sprout them 2 to 3 weeks in diffused light before planting."],["Planting","Plant 10 cm deep, about 75 cm between rows and 30 cm between tubers, sprouts up."],["Care","Earth up soil around stems at 3 to 4 weeks so tubers stay covered. Watch for late blight in wet, cool weather and rotate crops."],["Harvest","3 to 4 months, when leaves yellow. Let skins firm up before storing in a cool, dark place."]]],
+["Vegetable","Kale (sukuma wiki)","A hardy leaf crop that gives food for months.",[["Start","Sow in a nursery, then transplant at about 4 weeks."],["Spacing","About 45 cm between rows and 30 cm between plants."],["Feeding","Manure at planting; a nitrogen top-dress every few weeks boosts leaf growth."],["Care","Keep moist and weeded. Check for aphids and remove badly affected leaves."],["Harvest","Start picking lower leaves at 6 to 8 weeks, leaving the top to keep growing for 3 to 6 months."]]],
+["Fruit","Tomatoes","High value, but needs steady water and disease care.",[["Nursery","Sow seed about 0.5 cm deep. Transplant at 4 to 5 weeks when seedlings are 15 to 20 cm tall, preferably in the evening."],["Spacing","About 60 cm between rows and 45 cm between plants. Stake tall varieties."],["Water","Water at the base on a regular schedule. Uneven watering causes cracking and blossom end rot. Mulch to hold moisture."],["Disease","Avoid wetting leaves, rotate away from potatoes and other nightshades, and remove infected leaves quickly."],["Harvest","About 2.5 to 3.5 months after sowing, picking as fruit colours."]]],
+["Fruit","Bananas","A long-term crop that pays off with good mulch and water.",[["Planting material","Use clean tissue-culture plantlets or disease-free suckers."],["Holes","Dig about 60 x 60 x 60 cm and mix topsoil with manure. Space about 3 x 3 m."],["Care","Mulch heavily, water in dry spells, remove dead leaves, and keep 3 stems per mat (mother, daughter, granddaughter)."],["Harvest","From about 9 to 12 months or more, depending on variety and altitude."]]],
+["Fruit","Passion fruit","A climber that needs a strong trellis and good drainage.",[["Seedlings","Grafted seedlings resist soil diseases such as fusarium wilt."],["Trellis","Posts about 2 m high with wires; spacing about 3 m between rows and 2 m between plants."],["Planting","Dig a hole, mix in manure, plant with the graft union above ground, and water well."],["Care","Prune to keep vines open, mulch, and remove plants showing woodiness virus."],["Harvest","First fruit about 8 to 10 months after planting."]]],
+["Flower","Roses","Reward full sun, rich soil and regular pruning.",[["Site","At least 6 hours of sun, good air flow, well-drained soil enriched with compost."],["Planting","Hole about 40 cm wide and deep, spacing 60 to 90 cm. Keep the graft union just at or above soil level."],["Care","Water deeply at the base, mulch, deadhead spent blooms, and prune dead or crossing stems each year."],["Problems","Watch for aphids and black spot; remove affected leaves and avoid overhead watering."]]],
+["Flower","Sunflowers","Easy, drought tolerant, and good for bees and seed.",[["Planting","Sow seed 2 to 3 cm deep in full sun, about 30 cm apart in rows 75 cm apart."],["Care","Water deeply but rarely once established. Stake tall varieties in windy sites."],["Harvest","About 90 to 120 days. Cut when the back of the head turns yellow-brown and seeds are plump."]]]
+];
+function renderGuides(){
+  const q=$("q").value.toLowerCase();
+  const sh=G.filter(g=>!q||JSON.stringify(g).toLowerCase().includes(q));
+  if(!sh.length){$("list").innerHTML='<div class="note">No guides match your search.</div>';return;}
+  $("list").innerHTML=sh.map(g=>`<details class="card"><summary><h3>${esc(g[1])}</h3> <span class="tag">${esc(g[0])}</span><div class="meta">${esc(g[2])}</div></summary>${g[3].map(r=>`<div class="row"><b>${esc(r[0])}</b>${esc(r[1])}</div>`).join("")}</details>`).join("");
+}
+$("q").oninput=()=>tab==="guides"?renderGuides():render();
+$("f").onsubmit=async e=>{
+  e.preventDefault();
+  if(!db){alert("Posting needs claude.ai sign-in.");return;}
+  const body=$("b").value.trim();if(!body)return;
+  $("send").disabled=true;
+  try{
+    await db.collection("entries").add({type:tab,title:$("t").value.trim(),body,tags:$("g").value.split(",").map(s=>s.trim()).filter(Boolean).slice(0,8),by:me,at:Date.now()});
+    $("t").value=$("b").value=$("g").value="";
+  }catch(err){alert("Could not post. You may have view-only access.");}
+  $("send").disabled=false;
+};
+tabs();hintUp();
+(async()=>{
+  try{
+    db=await claude.use("db");userCap=await claude.use("user");
+    if(userCap)me=await userCap.id();
+  }catch(e){}
+  listen();
+})();
+</script>
+</body>
+</html>
